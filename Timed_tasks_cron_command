@@ -1,5 +1,0 @@
-0 1 * * 1,3,5 /home/zhulei/anaconda3/envs/zhulei/bin/python /public/home/hpc/zhulei/superman/quant/code/DoubleColorBall/a_zhu.py > /public/home/hpc/zhulei/superman/quant/code/DoubleColorBall/20250212_error.out 2>&1 &
-
-
-crontab -e
-crontab -l

@@ -14,6 +14,7 @@ logs/
 predictions/
 saved_models/
 models/
+data/
 backup/
 scenarios/
 .DS_Store
@@ -22,5 +23,9 @@ scenarios/
 *.csv
 *.xlsx
 *.h5
+*.keras
 features/
 scenarios/
+*.txt
+*.out
+*.png
