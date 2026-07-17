@@ -40,6 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import numpy as np
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -102,7 +103,8 @@ def main():
     logger.info(f"双色球模型训练 | {datetime.now():%Y-%m-%d %H:%M}")
     logger.info("=" * 55)
 
-    logger.info("加载数据并构建特征...")
+    logger.info("加载数据库并构建特征...")
+    t_feat = time.time()
     data = build_all_features(config)
 
     red_X = data["red"]["X"]
@@ -110,8 +112,17 @@ def main():
     blue_X = data["blue"]["X"]
     blue_y = data["blue"]["y"]
 
-    logger.info(f"红球: X={red_X.shape}, y={red_y.shape}")
-    logger.info(f"蓝球: X={blue_X.shape}, y={blue_y.shape}")
+    logger.info("─" * 55)
+    logger.info(f"📊 数据加载完成 (耗时 {time.time()-t_feat:.0f}s):")
+    logger.info(f"  红球特征: X={red_X.shape} (样本×窗口×特征) y={red_y.shape}")
+    logger.info(f"    → 总样本={red_X.shape[0]}, 窗口={config.window}期, 特征/期={red_X.shape[2]}维")
+    logger.info(f"    → 标签范围=[{red_y.min()},{red_y.max()}], 各位置分布:")
+    for i in range(3):
+        logger.info(f"      位置{i+1}: 最频={np.argmax(np.bincount(red_y[:,i]))+1:02d}")
+    logger.info(f"  蓝球特征: X={blue_X.shape} (样本×特征) y={blue_y.shape}")
+    logger.info(f"    → 总样本={blue_X.shape[0]}, 特征={blue_X.shape[1]}维")
+    logger.info(f"    → 标签分布: {np.bincount(blue_y).tolist()}")
+    logger.info("─" * 55)
 
     version = datetime.now().strftime("%Y%m%d_%H%M")
 
@@ -139,7 +150,13 @@ def main():
             }
         else:
             # Optuna 搜索
-            logger.info("Phase 1: Optuna 超参数搜索...")
+            logger.info("=" * 55)
+            logger.info(f"Phase 1/2: Optuna 红球超参数搜索")
+            logger.info(f"  搜索空间: lstm_units=32-320, num_heads=2-12, ff_dim=64-768")
+            logger.info(f"  optimizer=[adam/nadam/rmsprop], lr=1e-6~3e-2")
+            logger.info(f"  trials={args.trials or config.optuna_n_trials}, "
+                        f"并行={config.optuna_n_jobs}, 超时={args.timeout or config.optuna_timeout}s")
+            logger.info("=" * 55)
             t0 = time.time()
             search_result = search_red(
                 red_X, red_y, config,
@@ -147,12 +164,15 @@ def main():
                 timeout=args.timeout or config.optuna_timeout,
             )
             best_params = search_result["params"]
-            logger.info(f"搜索完成，耗时 {time.time() - t0:.0f}s")
-            logger.info(f"最佳参数: {json.dumps(best_params, indent=2)}")
-            logger.info(f"最佳损失: {search_result['best_value']:.6f}")
+            elapsed = time.time() - t0
+            logger.info(f"[Phase 1] 搜索完成 | 耗时={elapsed:.0f}s ({elapsed/60:.1f}min)")
+            logger.info(f"[Phase 1] 最佳损失: {search_result['best_value']:.6f}")
+            logger.info(f"[Phase 1] 最佳参数: {json.dumps(best_params, indent=2, ensure_ascii=False)}")
 
         # 最终训练
-        logger.info("Phase 2: 训练最终模型...")
+        logger.info("=" * 55)
+        logger.info(f"Phase 2/2: 训练最终红球模型 (epochs={args.epochs})")
+        logger.info("=" * 55)
         t0 = time.time()
         red_model, red_history = train_red_model(
             red_X, red_y, best_params, config, epochs=args.epochs,
@@ -191,17 +211,23 @@ def main():
                 n_trials=args.trials or min(config.optuna_n_trials, 20),
                 timeout=args.timeout or config.optuna_timeout,
             )
-            logger.info(f"搜索完成，耗时 {time.time() - t0:.0f}s")
+            elapsed = time.time() - t0
+            logger.info(f"[Phase 1] 蓝球搜索完成 | 耗时={elapsed:.0f}s ({elapsed/60:.1f}min)")
 
         # 最终训练
-        logger.info(f"Phase 2: 训练最终 Stacking 模型...")
+        logger.info("=" * 55)
+        logger.info(f"Phase 2/2: 训练最终 Stacking 蓝球模型")
+        logger.info("=" * 55)
         t0 = time.time()
         blue_model, blue_metrics = train_blue_model(
             blue_X, blue_y, blue_params, config,
         )
-        logger.info(f"蓝球训练完成，耗时 {time.time() - t0:.0f}s")
-        logger.info(f"蓝球准确率: Top-1={blue_metrics['accuracy']:.4f}, "
-                     f"Top-3={blue_metrics['top3_accuracy']:.4f}")
+        elapsed = time.time() - t0
+        logger.info(f"[Phase 2] 蓝球训练完成 | 耗时={elapsed:.0f}s")
+        logger.info(f"[Phase 2] 蓝球测试集: Top-1准确率={blue_metrics['accuracy']:.4f} "
+                     f"(随机基线=0.0625, 提升={blue_metrics['accuracy']/0.0625:.1f}倍)")
+        logger.info(f"[Phase 2] 蓝球测试集: Top-3准确率={blue_metrics['top3_accuracy']:.4f} "
+                     f"(随机基线=0.1875, 提升={blue_metrics['top3_accuracy']/0.1875:.1f}倍)")
 
         # 保存
         blue_save_path = blue_model.save(

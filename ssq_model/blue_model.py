@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import pickle
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -166,10 +167,12 @@ class BlueStackingModel:
         oof_preds = np.zeros((n_samples, n_models * n_classes), dtype=np.float32)
 
         for model_idx, (name, model) in enumerate(self.base_models.items()):
-            logger.info(f"训练基模型: {name}...")
+            t0 = time.time()
+            logger.info(f"[蓝球] 训练基模型 {model_idx+1}/4: {name} (5折交叉验证)...")
             col_start = model_idx * n_classes
             col_end = col_start + n_classes
 
+            fold_accs = []
             for fold, (train_idx, val_idx) in enumerate(kf.split(X, y)):
                 X_tr, X_val = X[train_idx], X[val_idx]
                 y_tr, y_val = y[train_idx], y[val_idx]
@@ -177,11 +180,24 @@ class BlueStackingModel:
                 model.fit(X_tr, y_tr)
                 oof_preds[val_idx, col_start:col_end] = model.predict_proba(X_val)
 
+                # 每折准确率
+                fold_pred = np.argmax(model.predict_proba(X_val), axis=1)
+                fold_acc = np.mean(fold_pred == y_val)
+                fold_accs.append(fold_acc)
+
             # 用全部数据重新训练（用于最终预测）
             model.fit(X, y)
 
+            elapsed = time.time() - t0
+            logger.info(
+                f"[蓝球] {name} 完成 | 5折准确率: "
+                f"{' / '.join(f'{a:.3f}' for a in fold_accs)} | "
+                f"均值={np.mean(fold_accs):.3f} | 耗时={elapsed:.0f}s"
+            )
+
         # ── 训练元模型 ──
-        logger.info("训练元模型 (LogisticRegression)...")
+        logger.info("[蓝球] 训练元模型 (LogisticRegression)...")
+        t0 = time.time()
         self.meta_model = LogisticRegression(
             multi_class="multinomial",
             max_iter=1000,
@@ -190,8 +206,16 @@ class BlueStackingModel:
         )
         self.meta_model.fit(oof_preds, y)
 
+        # 元模型在 oof 上的准确率
+        meta_pred = self.meta_model.predict(oof_preds)
+        meta_acc = np.mean(meta_pred == y)
+        logger.info(
+            f"[蓝球] 元模型完成 | oof准确率={meta_acc:.4f} | "
+            f"耗时={time.time()-t0:.0f}s | 总样本={n_samples}"
+        )
+
         self._fitted = True
-        logger.info("蓝球 Stacking 模型训练完成")
+        logger.info(f"[蓝球] Stacking 集成训练全部完成")
         return self
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
@@ -344,7 +368,8 @@ def search_blue_hyperparams(
     skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
 
     # ── LightGBM 搜索 ──
-    logger.info("搜索 LightGBM 超参数...")
+    logger.info(f"[蓝球Optuna] 搜索 LightGBM ({n_trials} trials)...")
+    t0 = time.time()
 
     def lgb_objective(trial):
         params = {
@@ -364,10 +389,14 @@ def search_blue_hyperparams(
     study.optimize(lgb_objective, n_trials=n_trials, timeout=timeout // 2,
                    show_progress_bar=True)
     best_params["lgb"] = study.best_params
-    logger.info(f"LightGBM 最佳: acc={study.best_value:.4f}")
+    logger.info(f"[蓝球Optuna] LightGBM 完成 | 最佳acc={study.best_value:.4f} | "
+                f"耗时={time.time()-t0:.0f}s | 最佳参数: n_estimators={study.best_params.get('n_estimators','?')}, "
+                f"lr={study.best_params.get('learning_rate','?'):.4f}, "
+                f"leaves={study.best_params.get('num_leaves','?')}")
 
     # ── XGBoost 搜索 ──
-    logger.info("搜索 XGBoost 超参数...")
+    logger.info(f"[蓝球Optuna] 搜索 XGBoost ({n_trials} trials)...")
+    t0 = time.time()
 
     def xgb_objective(trial):
         params = {
@@ -388,7 +417,10 @@ def search_blue_hyperparams(
     study.optimize(xgb_objective, n_trials=n_trials, timeout=timeout // 2,
                    show_progress_bar=True)
     best_params["xgb"] = study.best_params
-    logger.info(f"XGBoost 最佳: acc={study.best_value:.4f}")
+    logger.info(f"[蓝球Optuna] XGBoost 完成 | 最佳acc={study.best_value:.4f} | "
+                f"耗时={time.time()-t0:.0f}s | 最佳参数: n_estimators={study.best_params.get('n_estimators','?')}, "
+                f"lr={study.best_params.get('learning_rate','?'):.4f}, "
+                f"depth={study.best_params.get('max_depth','?')}")
 
     return best_params
 

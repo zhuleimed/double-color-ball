@@ -41,6 +41,78 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 
 # ════════════════════════════════════════════════════════════
+#  训练日志回调
+# ════════════════════════════════════════════════════════════
+
+class TrainingLogger(tf.keras.callbacks.Callback):
+    """详细的训练过程日志记录器。
+
+    在每个 epoch 结束时输出关键指标，支持:
+      - 各位置红球准确率追踪
+      - 最佳轮次标记 (★)
+      - 过拟合检测（训练/验证差距 > 0.5 时告警）
+      - 学习率追踪
+      - 早停原因记录
+    """
+
+    def __init__(self, trial_name: str = "", log_every: int = 5):
+        super().__init__()
+        self.trial_name = trial_name
+        self.log_every = log_every
+        self.best_val_loss = float("inf")
+        self.best_epoch = 0
+
+    def on_train_begin(self, logs=None):
+        logger.info(
+            f"[{self.trial_name}] 训练开始 | "
+            f"样本={self.params.get('samples', '?')} | "
+            f"批次={self.params.get('batch_size', '?')} | "
+            f"总轮数={self.params.get('epochs', '?')}"
+        )
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        epoch += 1
+
+        val_loss = logs.get("val_loss", float("inf"))
+        is_best = val_loss < self.best_val_loss
+        if is_best:
+            self.best_val_loss = val_loss
+            self.best_epoch = epoch
+
+        if epoch % self.log_every == 0 or is_best or epoch == 1:
+            # 各位置准确率
+            accs = []
+            for i in range(6):
+                a = logs.get(f"red_pos_{i}_sparse_categorical_accuracy", 0)
+                accs.append(a)
+            lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+            best = " ★" if is_best else ""
+            logger.info(
+                f"[{self.trial_name}] Epoch {epoch:3d}/{self.params['epochs']}{best} | "
+                f"loss={logs.get('loss',0):.4f} val={val_loss:.4f} | "
+                f"acc=[{accs[0]:.3f}/{accs[1]:.3f}/{accs[2]:.3f}/"
+                f"{accs[3]:.3f}/{accs[4]:.3f}/{accs[5]:.3f}] | "
+                f"lr={lr:.2e} | 最佳轮={self.best_epoch}"
+            )
+
+        # 每 10 轮过拟合检测
+        if epoch % 10 == 0:
+            gap = val_loss - logs.get("loss", 0)
+            if gap > 0.5:
+                logger.warning(
+                    f"[{self.trial_name}] ⚠ 过拟合: "
+                    f"train_loss={logs.get('loss',0):.4f} val_loss={val_loss:.4f} gap={gap:.4f}"
+                )
+
+    def on_train_end(self, logs=None):
+        logger.info(
+            f"[{self.trial_name}] 训练结束 | "
+            f"最佳轮={self.best_epoch} | 最佳val_loss={self.best_val_loss:.4f}"
+        )
+
+
+# ════════════════════════════════════════════════════════════
 #  Transformer Block
 # ════════════════════════════════════════════════════════════
 
@@ -223,6 +295,9 @@ def _build_objective(X, y, config: ModelConfig, n_trials: int):
                 learning_rate=learning_rate,
             )
 
+            trial_label = f"T{trial.number}"
+            train_logger = TrainingLogger(trial_label, log_every=20)
+
             early_stop = EarlyStopping(
                 monitor="val_loss", patience=10,
                 restore_best_weights=True, verbose=0,
@@ -233,12 +308,19 @@ def _build_objective(X, y, config: ModelConfig, n_trials: int):
                 validation_data=(X_val, y_val),
                 epochs=100,
                 batch_size=batch_size,
-                callbacks=[early_stop],
+                callbacks=[early_stop, train_logger],
                 verbose=0,
             )
 
             best_val = min(history.history["val_loss"])
+            best_epoch = history.history["val_loss"].index(best_val) + 1
             val_losses.append(best_val)
+
+            logger.info(
+                f"[T{trial.number}] fold完成 | "
+                f"最佳val_loss={best_val:.4f} @ epoch {best_epoch} | "
+                f"总轮数={len(history.history['val_loss'])}"
+            )
 
             # 清理
             del model
@@ -281,21 +363,51 @@ def search_hyperparams(
 
     objective_fn = _build_objective(X, y, config, n_trials)
 
-    # 添加进度回调
+    # 进度回调：每完成一个 trial 输出汇总
+    class TrialProgressCallback:
+        def __init__(self):
+            self.completed = 0
+            self.total = n_trials
+            self.best_so_far = float("inf")
+            self.start_time = datetime.now()
+
+        def __call__(self, study: optuna.Study, trial: optuna.trial.FrozenTrial):
+            self.completed += 1
+            if trial.value is not None and trial.value < self.best_so_far:
+                self.best_so_far = trial.value
+            elapsed = (datetime.now() - self.start_time).total_seconds()
+            eta = (elapsed / self.completed) * (self.total - self.completed) if self.completed > 0 else 0
+            logger.info(
+                f"[Optuna] Trial {self.completed}/{self.total} 完成 | "
+                f"当前值={trial.value:.4f} | 全局最佳={self.best_so_far:.4f} | "
+                f"耗时={elapsed:.0f}s | 预计剩余={eta:.0f}s | "
+                f"已修剪={len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED])}"
+            )
+
+    progress_cb = TrialProgressCallback()
+
     study = optuna.create_study(
         direction="minimize",
         study_name=f"red_lstm_transformer_{datetime.now():%Y%m%d_%H%M}",
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=3),
     )
     study.optimize(
         objective_fn,
         n_trials=n_trials,
         n_jobs=config.optuna_n_jobs,
         timeout=timeout,
+        callbacks=[progress_cb],
         show_progress_bar=True,
     )
 
+    # 汇总
+    completed = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+    pruned = len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED])
+    failed = len([t for t in study.trials if t.state == optuna.trial.TrialState.FAIL])
+    logger.info(f"搜索完成: {completed} 完成, {pruned} 修剪, {failed} 失败")
+
     best = study.best_params
-    logger.info(f"最佳参数: {best}")
+    logger.info(f"最佳参数: {json.dumps(best, indent=2, ensure_ascii=False)}")
     logger.info(f"最佳损失: {study.best_value:.6f}")
 
     return {
@@ -342,6 +454,7 @@ def train_red_model(
     y_test = [y[-test_size:][:, j] for j in range(6)]
 
     logger.info(f"训练集: {len(X_train)}, 测试集: {len(X_test)}")
+    logger.info(f"模型参数: {json.dumps({k: v for k, v in params.items() if k != 'batch_size'}, indent=2, ensure_ascii=False)}")
 
     # 构建模型
     model = create_red_model(
@@ -350,16 +463,22 @@ def train_red_model(
         **params,
     )
 
+    # 计算模型参数量
+    total_params = model.count_params()
+    logger.info(f"模型参数量: {total_params:,}")
+
     # 回调
+    train_logger = TrainingLogger("最终训练", log_every=5)
     callbacks = [
         EarlyStopping(
             monitor="val_loss", patience=20,
-            restore_best_weights=True, verbose=1,
+            restore_best_weights=True, verbose=0,
         ),
         ReduceLROnPlateau(
             monitor="val_loss", factor=0.5,
-            patience=8, min_lr=1e-6, verbose=1,
+            patience=8, min_lr=1e-6, verbose=0,
         ),
+        train_logger,
     ]
 
     # 训练
