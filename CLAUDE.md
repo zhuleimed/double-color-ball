@@ -89,8 +89,20 @@ python pipeline.py --backfill                    # 全量回填
   - 早停 patience=20, ReduceLROnPlateau factor=0.5
 - **蓝球**: LightGBM+XGBoost+CatBoost+RF → Stacking(LogisticRegression)
   - 5折交叉验证生成元特征
-- **Optuna**: 50 trials, n_jobs=6, 每trial 4线程, 总CPU≤33核
+- **Optuna**: 50 trials, n_jobs=6, 每trial 4线程, 总CPU≤33核，带MedianPruner自动修剪
 - **特征**: 红球82维/期(频次33+遗漏33+号码6+区间3+和值/跨度/AC值3+奇偶/大小/质合比3+连号1)
+- **训练日志**: 详细阶段性输出（TrainingLogger回调: 每5轮准确率/损失/lr, 过拟合检测, 早停原因；Optuna TrialProgressCallback: 实时进度/最佳值/ETA；蓝球逐折准确率）
+
+## 训练日志说明
+
+日志中关键标记:
+- `★` — 当前最佳轮次（val_loss 新低）
+- `⚠ 过拟合` — train_loss 和 val_loss 差距 > 0.5，模型可能过拟合
+- `[T{trial}]` — Optuna 第 trial 号试验
+- `[最终训练]` — 用最佳参数进行的最终完整训练
+- `[蓝球]` — 蓝球模型训练阶段
+- `[蓝球Optuna]` — 蓝球超参数搜索
+- `[Optuna] Trial N/M 完成` — 搜索进度，含全局最佳值和预计剩余时间
 
 ## 数据库表
 
