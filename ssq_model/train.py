@@ -99,7 +99,8 @@ def main():
 
     if not any([args.full, args.red_only, args.blue_only]):
         parser.print_help()
-        print("\n请指定训练模式：--full / --red-only / --blue-only / --quick")
+        print("\n请指定训练模式：--full / --red-only / --blue-only")
+        print("  可结合 --quick 跳过 Optuna 搜索（仅用默认参数训练）")
         sys.exit(1)
 
     # ── 加载特征 ──

@@ -18,6 +18,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# 禁用 GPU — 必须在 import tensorflow 之前
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+
 import numpy as np
 import optuna
 import tensorflow as tf
@@ -36,8 +39,6 @@ from ssq_sync.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 禁用 GPU（仅 CPU 模式）
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 
 # ════════════════════════════════════════════════════════════
@@ -498,13 +499,20 @@ def train_red_model(
 
     # 评估
     test_loss = model.evaluate(X_test, y_test, verbose=0)
-    # test_loss 是 [total_loss, acc0, acc1, ..., acc5]
+    # 多输出模型 evaluate 返回: [总loss, out0_loss...out5_loss, out0_acc...out5_acc]
+    # 共 1 + 6 + 6 = 13 个值，准确率从索引 7 开始
     if isinstance(test_loss, list):
-        accs = test_loss[1:]  # 各位置准确率
-        avg_acc = np.mean(accs)
-        logger.info(f"测试集平均准确率: {avg_acc:.4f}")
-        for i, acc in enumerate(accs):
-            logger.info(f"  位置 {i+1}: {acc:.4f}")
+        metric_names = model.metrics_names
+        acc_indices = [i for i, n in enumerate(metric_names)
+                       if "accuracy" in n and n != "loss"]
+        if acc_indices:
+            accs = [test_loss[i] for i in acc_indices]
+            avg_acc = np.mean(accs)
+            logger.info(f"测试集平均准确率: {avg_acc:.4f}")
+            for i, (idx, acc) in enumerate(zip(acc_indices, accs)):
+                logger.info(f"  位置 {i+1}: {acc:.4f} ({metric_names[idx]})")
+        else:
+            logger.info(f"测试损失: {test_loss[0]:.4f}")
     else:
         logger.info(f"测试损失: {test_loss}")
 
