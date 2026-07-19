@@ -24,7 +24,8 @@ import time
 #  CPU 核心限制 — 本项目最多使用 33 核（总 36 核，预留 3 核）
 #  必须在任何 import numpy/tensorflow 之前设置
 # ════════════════════════════════════════════════════════════
-_NUM_THREADS = "4"  # 每个并行任务最多使用 4 线程
+_NUM_THREADS = "4"  # 每个并行任务最多使用 4 线程（OMP/MKL/NUMEXPR等）
+_NUM_TF_THREADS = "8"  # TensorFlow 每个 trial 的 intra/inter 线程数
 os.environ.setdefault("OMP_NUM_THREADS", _NUM_THREADS)
 os.environ.setdefault("OPENBLAS_NUM_THREADS", _NUM_THREADS)
 os.environ.setdefault("MKL_NUM_THREADS", _NUM_THREADS)
@@ -32,6 +33,9 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", _NUM_THREADS)
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS", _NUM_THREADS)
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+# TensorFlow 自身线程池 — 不设置则默认=全部核心
+os.environ.setdefault("TF_NUM_INTRAOP_THREADS", _NUM_TF_THREADS)
+os.environ.setdefault("TF_NUM_INTEROP_THREADS", _NUM_TF_THREADS)
 from datetime import datetime
 from pathlib import Path
 

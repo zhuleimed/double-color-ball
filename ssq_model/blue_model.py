@@ -51,7 +51,7 @@ def _create_lgb(params: dict | None = None) -> object:
         "reg_lambda": 0.1,
         "random_state": 42,
         "verbose": -1,
-        "n_jobs": -1,
+        "n_jobs": 4,
     }
     if params:
         defaults.update(params)
@@ -72,7 +72,7 @@ def _create_xgb(params: dict | None = None) -> object:
         "reg_lambda": 1.0,
         "random_state": 42,
         "verbosity": 0,
-        "n_jobs": -1,
+        "n_jobs": 4,
     }
     if params:
         defaults.update(params)
@@ -89,7 +89,7 @@ def _create_cat(params: dict | None = None) -> object:
         "l2_leaf_reg": 3.0,
         "random_seed": 42,
         "verbose": 0,
-        "thread_count": -1,
+        "thread_count": 4,
     }
     if params:
         defaults.update(params)
@@ -104,7 +104,7 @@ def _create_rf(params: dict | None = None) -> object:
         "min_samples_split": 5,
         "min_samples_leaf": 2,
         "random_state": 42,
-        "n_jobs": -1,
+        "n_jobs": 4,
     }
     if params:
         defaults.update(params)
@@ -202,7 +202,7 @@ class BlueStackingModel:
             multi_class="multinomial",
             max_iter=1000,
             random_state=42,
-            n_jobs=-1,
+            n_jobs=4,
         )
         self.meta_model.fit(oof_preds, y)
 

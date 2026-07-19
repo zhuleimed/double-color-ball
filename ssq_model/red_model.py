@@ -137,8 +137,8 @@ class TransformerBlock(tf.keras.layers.Layer):
         ])
         self.layernorm1 = LayerNormalization(epsilon=1e-6)
         self.layernorm2 = LayerNormalization(epsilon=1e-6)
-        self.dropout1 = Dropout(dropout_rate)
-        self.dropout2 = Dropout(dropout_rate)
+        self.dropout1 = Dropout(dropout_rate, name=f"{self.name}_dropout1")
+        self.dropout2 = Dropout(dropout_rate, name=f"{self.name}_dropout2")
 
     def call(self, inputs, training=False):
         attn_output = self.att(inputs, inputs)
@@ -200,7 +200,7 @@ def create_red_model(
 
     # ── LSTM 编码器 ──
     x = LSTM(lstm_units, return_sequences=True, name="lstm_1")(inputs)
-    x = Dropout(dropout_rate)(x)
+    x = Dropout(dropout_rate, name="dropout_after_lstm1")(x)
 
     # ── Transformer 层 ──
     for i in range(num_transformers):
@@ -215,11 +215,11 @@ def create_red_model(
 
     # ── 第二层 LSTM ──
     x = LSTM(lstm_units2, return_sequences=False, name="lstm_2")(x)
-    x = Dropout(dropout_rate)(x)
+    x = Dropout(dropout_rate, name="dropout_after_lstm2")(x)
 
     # ── 共享 Dense 层 ──
     x = Dense(dense_units, activation="relu", name="shared_dense")(x)
-    x = Dropout(dropout_rate)(x)
+    x = Dropout(dropout_rate, name="dropout_after_dense")(x)
 
     # ── 6 个并行的分类头（每个红球位置独立） ──
     outputs = []
@@ -456,11 +456,16 @@ def train_red_model(
     logger.info(f"训练集: {len(X_train)}, 测试集: {len(X_test)}")
     logger.info(f"模型参数: {json.dumps({k: v for k, v in params.items() if k != 'batch_size'}, indent=2, ensure_ascii=False)}")
 
+    # 分离 batch_size（训练用）与模型架构参数
+    model_params = {k: v for k, v in params.items() if k != "batch_size"}
+    if "batch_size" in params:
+        batch_size = params["batch_size"]
+
     # 构建模型
     model = create_red_model(
         window=config.window,
         n_features=X.shape[2],
-        **params,
+        **model_params,
     )
 
     # 计算模型参数量

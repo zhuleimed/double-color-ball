@@ -75,12 +75,15 @@ python pipeline.py --backfill                    # 全量回填
 ## Cron 调度
 
 ```
-# 每日管线（周三/五/一 10:00）
+# 每日管线（周三/五/一 10:00，开奖日次日）
 0 10 * * 3,5,1 cd ... && python pipeline.py >> logs/pipeline_$(date +\%Y\%m\%d).log
 
-# 月度训练（每月1号 00:00）
-0 0 1 * * cd ... && python -m ssq_model.train --full >> logs/retrain_$(date +\%Y\%m).log
+# 月度完整训练（月末倒数第二天 00:00，提前 ~34h 确保管线日前完成）
+# 先同步最新数据，再训练。训练约 30-35h，为管线日 10:00 留足缓冲。
+0 0 27-31 * * [ "$(date -d '+2 day' +\%d)" = "01" ] && cd ... && python -m ssq_sync.main --sync-only && python -m ssq_model.train --full >> logs/retrain_$(date +\%Y\%m).log
 ```
+
+**为什么是月末倒数第二天？** 完整训练实测需 30h+，若在 1 号 00:00 启动，当天 10:00 管线来不及。提前 1.5 天启动后，管线日永远有新模型可用。训练前先 `--sync-only` 确保数据最新，缺口仅 1-2 期（0.05%）可忽略。
 
 ## 模型架构
 
@@ -89,7 +92,8 @@ python pipeline.py --backfill                    # 全量回填
   - 早停 patience=20, ReduceLROnPlateau factor=0.5
 - **蓝球**: LightGBM+XGBoost+CatBoost+RF → Stacking(LogisticRegression)
   - 5折交叉验证生成元特征
-- **Optuna**: 50 trials, n_jobs=6, 每trial 4线程, 总CPU≤33核，带MedianPruner自动修剪
+- **Optuna**: 50 trials, n_jobs=4, TF_NUM_INTRAOP/INTEROP_THREADS=8, OMP/MKL等=4
+  - 峰值CPU: 4×8=32核（在33核限制内）
 - **特征**: 红球82维/期(频次33+遗漏33+号码6+区间3+和值/跨度/AC值3+奇偶/大小/质合比3+连号1)
 - **训练日志**: 详细阶段性输出（TrainingLogger回调: 每5轮准确率/损失/lr, 过拟合检测, 早停原因；Optuna TrialProgressCallback: 实时进度/最佳值/ETA；蓝球逐折准确率）
 

@@ -43,7 +43,7 @@ class ModelConfig:
 
     # ── Optuna 搜索参数 ──
     optuna_n_trials: int = 50       # 超参数搜索试验次数（增强版）
-    optuna_n_jobs: int = 6          # 并行试验数（限33核总CPU，每trial约4核=24核）
+    optuna_n_jobs: int = 4          # 并行 trial 数（4×8=32核，在33核以内）
     optuna_timeout: int = 21600     # 搜索超时（秒），6 小时
 
     # ── 红球模型架构搜索范围 ──
