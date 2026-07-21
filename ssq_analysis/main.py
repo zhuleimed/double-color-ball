@@ -307,6 +307,19 @@ def blue_analysis(blue: np.ndarray) -> str:
         f"{n:02d}({scores[n-1]:.2f})" for n in top5
     ))
 
+    # 4. 下期蓝球预测
+    lines.append("")
+    lines.append("🔮 下期蓝球预测")
+    # 用频率加权随机采样 (不用argmax, 避免永远选同一个号码)
+    probs = np.zeros(16)
+    for i in range(16):
+        probs[i] = scores[i]
+    probs = probs / probs.sum()
+    rng = np.random.RandomState(int(date.today().strftime("%Y%m%d")))
+    predicted = rng.choice(16, size=1, p=probs)[0] + 1
+    lines.append(f"  推荐蓝球: {predicted:02d}")
+    lines.append(f"  备选: " + " ".join(f"{n:02d}" for n in top5[:3] if n != predicted))
+
     return "\n".join(lines)
 
 
