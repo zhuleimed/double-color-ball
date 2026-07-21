@@ -60,9 +60,7 @@ def bias_detection(reds: np.ndarray, blue: np.ndarray) -> str:
     """
     n_draws = len(reds)
     lines = []
-    lines.append("━" * 45)
     lines.append("【分析一】物理偏差检测")
-    lines.append("━" * 45)
     lines.append(f"数据: {n_draws} 期")
     lines.append("")
 
@@ -174,9 +172,7 @@ def coverage_strategy(reds: np.ndarray, n_pick: int = 15) -> str:
     """
     n_draws = len(reds)
     lines = []
-    lines.append("━" * 45)
     lines.append("【分析二】组合覆盖策略 — 轮选号码推荐")
-    lines.append("━" * 45)
     lines.append("")
 
     # 1. 频率分: 全局出现次数 / 总次数
@@ -244,9 +240,7 @@ def blue_analysis(blue: np.ndarray) -> str:
     """
     n_draws = len(blue)
     lines = []
-    lines.append("━" * 45)
     lines.append("【分析三】蓝球统计分析")
-    lines.append("━" * 45)
     lines.append(f"数据: {n_draws} 期")
     lines.append("")
 
@@ -338,15 +332,10 @@ def run_analysis() -> str:
     latest_period = str(n_draws)
 
     parts = []
-    parts.append("=" * 45)
-    parts.append(f"  双色球统计分析报告")
-    parts.append(f"  日期: {date.today().isoformat()}")
-    parts.append(f"  数据: 共 {n_draws} 期")
-    parts.append("=" * 45)
+    parts.append(f"双色球统计分析报告")
+    parts.append(f"日期: {date.today().isoformat()} | 数据: 共 {n_draws} 期")
     parts.append("")
-    parts.append("⚠️ 说明: 本分析基于统计方法, 不代表能预测未来号码。")
-    parts.append("  双色球每期独立开奖, 任何分析方法均无法提高单期中奖概率。")
-    parts.append("  本报告仅供研究参考。")
+    parts.append("⚠️ 说明: 本分析基于统计方法, 不代表能预测未来号码。双色球每期独立开奖, 任何分析方法均无法提高单期中奖概率。本报告仅供研究参考。")
     parts.append("")
 
     # 三项分析
