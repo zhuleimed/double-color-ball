@@ -173,7 +173,7 @@ def run_pipeline():
          "required": True, "timeout": 300},
         {"id": "compare", "name": "结果对比", "cmd": ["-m", "ssq_report.compare"],
          "required": False, "timeout": 120},
-        {"id": "predict", "name": "模型预测", "cmd": ["-m", "ssq_model.predict", "--beam", "5"],
+        {"id": "analyze", "name": "统计分析(偏差+覆盖+蓝球)", "cmd": ["-m", "ssq_analysis.main"],
          "required": True, "timeout": 300},
     ]
 
@@ -192,75 +192,25 @@ def run_pipeline():
             pipeline_ok = False
             break
 
-    # ── Step 4: 生成并推送日报 ──
-    ps.add_step("report", "日报推送")
+    # ── Step 4: 推送统计分析报告 ──
+    ps.add_step("report", "报告推送")
     ps.start_step("report")
 
     try:
-        import sqlite3
-        tracker = SuccessTracker()
-        db_path = PROJECT_DIR / "data" / "ssq_history.db"
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
+        from ssq_analysis.main import run_analysis
+        from ssq_report.notify import send_message
 
-        compare_row = conn.execute(
-            "SELECT * FROM result_compare ORDER BY period DESC LIMIT 1"
-        ).fetchone()
+        # 生成统计分析报告
+        analysis_report = run_analysis()
+        print(analysis_report)
 
-        compare_result = None
-        if compare_row:
-            pred_row = conn.execute(
-                "SELECT * FROM prediction_log WHERE period = ? ORDER BY id DESC LIMIT 1",
-                (compare_row["period"],),
-            ).fetchone()
-            draw_row = conn.execute(
-                "SELECT * FROM draw_history WHERE period = ?",
-                (compare_row["period"],),
-            ).fetchone()
-            if pred_row and draw_row:
-                compare_result = {
-                    "status": "ok", "period": compare_row["period"],
-                    "draw_date": draw_row["draw_date"],
-                    "pred_reds": [pred_row[f"red{i}"] for i in range(1, 7)],
-                    "actual_reds": [draw_row[f"red{i}"] for i in range(1, 7)],
-                    "pred_blue": pred_row["blue"], "actual_blue": draw_row["blue"],
-                    "red_hits": compare_row["pred_red_hits"],
-                    "blue_hit": compare_row["pred_blue_hit"],
-                    "hit_details": (
-                        compare_row["red_hit_details"].split(",")
-                        if compare_row["red_hit_details"] else []
-                    ),
-                    "prize_level": compare_row["prize_level"],
-                }
-
-        pred_row = conn.execute(
-            "SELECT * FROM prediction_log ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        next_prediction = None
-        if pred_row:
-            next_prediction = {
-                "period": pred_row["period"],
-                "reds": [pred_row[f"red{i}"] for i in range(1, 7)],
-                "blue": pred_row["blue"],
-            }
-        conn.close()
-
-        tracker.rebuild_from_db(str(db_path))
-
-        if compare_result or next_prediction:
-            report = generate_daily_report(compare_result, next_prediction, tracker)
-            print(report)
-            from ssq_report.notify import push_daily_report
-            push_daily_report(report)
-            print("  ✅ 日报已推送到微信")
-        else:
-            msg = "暂无预测数据"
-            print(f"  ⚠ {msg}")
-            push_simple_notice(msg)
+        # 推送到微信
+        send_message(analysis_report, "双色球统计分析报告")
+        print("  ✅ 分析报告已推送到微信")
 
         ps.complete_step("report", success=True)
     except Exception as e:
-        print(f"  ❌ 日报推送失败: {e}")
+        print(f"  ❌ 报告推送失败: {e}")
         ps.complete_step("report", success=False, error=str(e))
 
     # ── 结束 ──

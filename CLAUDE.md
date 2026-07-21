@@ -1,14 +1,17 @@
 # CLAUDE.md
 
-双色球 LSTM-Transformer 智能预测管线项目。全自动完成数据同步、模型预测、开奖结果对比和微信推送。
+双色球统计分析管线项目。全自动完成数据同步、统计偏差检测、组合覆盖策略分析、蓝球统计分析、开奖结果对比和微信推送。
+
+> **v2.1 更新 (2026-07-21):** 模型预测模块(ssq_model)已停用，替换为统计分析模块(ssq_analysis)，
+>   包含三项分析: 物理偏差检测 + 组合覆盖策略 + 蓝球统计分析。
+>   月度模型训练cron已暂停。原ssq_model代码保留但不再执行。
 
 ## 项目概览
 
-- **目标**: 利用深度学习预测双色球号码，追踪累积成功率
-- **服务器**: 36核 Intel Xeon Gold 6140 @ 2.30GHz, 187GB RAM, 无GPU，本项目限用33核
+- **目标**: 通过统计分析方法研究双色球号码规律，提供偏差检测、轮选策略和蓝球分析
+- **服务器**: 36核 Intel Xeon Gold 6140 @ 2.30GHz, 187GB RAM, 无GPU
 - **Python**: `/home/zhulei/anaconda3/bin/python` (3.12.7)
 - **GitHub**: `git@github.com:zhuleimed/DoubleColorBall.git`
-- **完整指南**: `双色球预测管线项目指南.docx`
 
 ## 业务节奏
 
@@ -29,15 +32,12 @@ DoubleColorBall/
 │   ├── sync.py              # SSQSync: 全量回填 + 增量同步 + 开奖日判断
 │   ├── notify.py / main.py
 │
-├── ssq_model/               # 模型预测模块
-│   ├── config.py            # ModelConfig: window=90, red_classes=33, optuna_n_trials=50
-│   ├── features.py          # 增强特征: 红球82维/期(频次+遗漏+区间+和值+AC值等)
-│   ├── red_model.py         # LSTM-Transformer 6×33分类 + Beam Search约束解码
-│   │                        #   早停: patience=20 + ReduceLROnPlateau
-│   ├── blue_model.py        # LGB+XGB+CatBoost+RF → Stacking(LR) 16分类
-│   ├── ensemble.py          # SSQEnsemble: 加载模型→预测→保存
-│   ├── train.py             # 训练入口 (--full/--quick/--red-only/--blue-only)
-│   └── predict.py           # 预测入口 (--beam/--no-save/--verbose)
+├── ssq_model/               # 模型预测模块 (已停用，代码保留)
+│   ├── config.py / features.py / red_model.py / blue_model.py
+│   ├── ensemble.py / train.py / predict.py
+│
+├── ssq_analysis/             # 统计分析模块 (当前使用)
+│   └── main.py               # 三合一分析: 偏差检测+覆盖策略+蓝球分析
 │
 ├── ssq_report/              # 结果对比与报告模块
 │   ├── compare.py           # 预测vs实际: 命中数+中奖等级判定
@@ -57,19 +57,15 @@ DoubleColorBall/
 python -m ssq_sync.main --backfill              # 全量回填
 python -m ssq_sync.main --sync-only              # 增量同步
 
-# 训练
-python -m ssq_model.train --quick                # 快速训练(默认参数)
-python -m ssq_model.train --full                 # 完整训练(Optuna 50 trials)
-python -m ssq_model.train --red-only --quick     # 仅红球快速训练
-python -m ssq_model.train --blue-only --quick    # 仅蓝球快速训练
-
-# 预测
-python -m ssq_model.predict --verbose            # 预测下期(详细输出)
+# 统计分析
+python -m ssq_analysis.main                      # 运行三项分析(偏差+覆盖+蓝球)
 
 # 管线
-python pipeline.py                               # 完整管线(同步→对比→预测→推送)
-python pipeline.py --predict-only                # 仅预测+推送
+python pipeline.py                               # 完整管线(同步→对比→分析→推送)
 python pipeline.py --backfill                    # 全量回填
+
+# 模型训练(已停用，代码保留)
+# python -m ssq_model.train --full               # 月度完整训练(Optuna 50 trials)
 ```
 
 ## Cron 调度
@@ -78,16 +74,14 @@ python pipeline.py --backfill                    # 全量回填
 # 每日管线（周三/五/一 10:00，开奖日次日）
 0 10 * * 3,5,1 cd ... && python pipeline.py >> logs/pipeline_$(date +\%Y\%m\%d).log
 
-# 月度完整训练（月末倒数第二天 00:00，提前 ~34h 确保管线日前完成）
-# 先同步最新数据，再训练。训练约 30-35h，为管线日 10:00 留足缓冲。
-0 0 27-31 * * [ "$(date -d '+2 day' +\%d)" = "01" ] && cd ... && python -m ssq_sync.main --sync-only && python -m ssq_model.train --full >> logs/retrain_$(date +\%Y\%m).log
+# 月度模型训练 — 已暂停 (2026-07-21)。模型预测替换为统计分析。
+# 如需恢复，取消下面注释:
+# 0 0 27-31 * * [ "$(date -d '+2 day' +\%d)" = "01" ] && cd ... && python -m ssq_sync.main --sync-only && python -m ssq_model.train --full >> logs/retrain_$(date +\%Y\%m).log
 ```
 
-**为什么是月末倒数第二天？** 完整训练实测需 30h+，若在 1 号 00:00 启动，当天 10:00 管线来不及。提前 1.5 天启动后，管线日永远有新模型可用。训练前先 `--sync-only` 确保数据最新，缺口仅 1-2 期（0.05%）可忽略。
+## 模型架构（已停用，仅供参考）
 
-## 模型架构
-
-- **红球**: LSTM(128)→TransformerBlock×2→LSTM(64)→6×Dense(33,softmax)
+- **红球**: LSTM(128)→TransformerBlock×3→LSTM(64)→6×Dense(33,softmax)
   - Beam Search约束解码保证递增+不重复
   - 早停 patience=20, ReduceLROnPlateau factor=0.5
 - **蓝球**: LightGBM+XGBoost+CatBoost+RF → Stacking(LogisticRegression)
