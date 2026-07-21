@@ -205,7 +205,7 @@ def run_pipeline():
         print(analysis_report)
 
         # 推送到微信
-        send_message(analysis_report, "双色球统计分析报告")
+        send_message("双色球统计分析报告", analysis_report)
         print("  ✅ 分析报告已推送到微信")
 
         ps.complete_step("report", success=True)
