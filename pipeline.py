@@ -260,27 +260,14 @@ def main():
         return
 
     if args.predict_only:
-        # 仅预测+推送（用于训练后手动触发）
-        run_step("predict", "模型预测",
-                 ["-m", "ssq_model.predict", "--beam", "5"],
-                 str(PROJECT_DIR), required=True, timeout=300)
-        # 推送简单预测
-        import sqlite3
-        conn = sqlite3.connect(str(PROJECT_DIR / "data" / "ssq_history.db"))
-        conn.row_factory = sqlite3.Row
-        pred_row = conn.execute("SELECT * FROM prediction_log ORDER BY id DESC LIMIT 1").fetchone()
-        conn.close()
-        if pred_row:
-            next_prediction = {
-                "period": pred_row["period"],
-                "reds": [pred_row[f"red{i}"] for i in range(1, 7)],
-                "blue": pred_row["blue"],
-            }
-            tracker = SuccessTracker()
-            report = generate_daily_report(None, next_prediction, tracker)
-            print(report)
-            from ssq_report.notify import push_daily_report
-            push_daily_report(report)
+        # 统计分析 + 推送（替代已停用的模型预测）
+        from ssq_analysis.main import run_analysis
+        from ssq_report.notify import send_message
+
+        analysis_report = run_analysis()
+        print(analysis_report)
+        send_message("双色球统计分析报告", analysis_report)
+        print("  ✅ 分析报告已推送到微信")
         return
 
     # 默认：完整管线
